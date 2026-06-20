@@ -64,17 +64,36 @@ df.loc[(df["priority_score"] == 1.0) & (df["drop_score"] == 1.0) & (df["etf_scor
 
 print(f"Broj sumnjivih/kontradiktornih odgovora: {df['suspicious'].sum()} ({100 * df['suspicious'].mean():.2f}%)")
 
-# 2. KOMPENZATORNA AGREGACIJA (Inspirisana principima IBA)
-def iba_inspirisan_operator(x1, x2, andness=0.75):
-    conjunctive_component = np.minimum(x1, x2)
-    compensatory_component = (x1 + x2) / 2
-    return (
-            andness * conjunctive_component
-            + (1 - andness) * compensatory_component
-    )
+# 2. IBA
+def generalized_boolean_product(a, b):
+    return np.minimum(a, b)
 
-df["risk_scaled"] = 0.7 * iba_inspirisan_operator(df["reaction_score"], df["drop_score"], andness=0.8) + 0.3 * df["priority_score"]
-df["knowledge_scaled"] = iba_inspirisan_operator(df["etf_score"], df["technical_score"], andness=0.75)
+
+def iba_logical_aggregation(a, b, alpha=0.75):
+
+    gp = generalized_boolean_product(a, b)
+
+    # IBA disjunkcija
+    iba_or = a + b - gp
+
+    # logička agregacija
+    return alpha * gp + (1 - alpha) * iba_or
+
+risk_core = iba_logical_aggregation(
+    df["reaction_score"],
+    df["drop_score"],
+    alpha=0.80
+)
+
+df["risk_scaled"] = (
+        0.7 * risk_core
+        + 0.3 * df["priority_score"]
+)
+df["knowledge_scaled"] = iba_logical_aggregation(
+    df["etf_score"],
+    df["technical_score"],
+    alpha=0.75
+)
 df["horizon_scaled"] = df["horizon_score"]
 
 # Skaliranje na interval [0, 10] i podela skupa
@@ -229,8 +248,6 @@ print("=" * 60)
 df["profile_category"] = np.where(df["fuzzy_profile_score"] <= score_q1, "Konzervativan",
                                   np.where(df["fuzzy_profile_score"] < score_q2, "Umeren", "Agresivan"))
 
-df["profile_category"] = np.where(df["fuzzy_profile_score"] <= score_q1, "Konzervativan",
-                                  np.where(df["fuzzy_profile_score"] < score_q2, "Umeren", "Agresivan"))
 
 # 6. ISPIS TABELA
 print("\n" + "=" * 60 + "\nDISTRIBUCIJA I DESKRIPTIVNA STATISTIKA INVESTICIONIH PROFILA\n" + "=" * 60)
@@ -250,6 +267,47 @@ mapa_statistika = {"count": "Broj uzoraka", "mean": "Srednja vrednost (Mean)", "
 tabela_5 = pd.DataFrame({"Statistički pokazatelj": desc.index, "Vrednost skora (MS*)": desc.values.round(2)})
 tabela_5["Statistički pokazatelj"] = tabela_5["Statistički pokazatelj"].map(mapa_statistika)
 print(tabela_5)
+
+
+# GENERISANJE UNKARSNE TABELE (STAROST vs PROFIL)
+stvarne_grupe = df["starosna_grupa"].dropna().unique()
+redosled_starosnih_grupa = sorted(stvarne_grupe)
+redoseled_profila = ["Konzervativan", "Umeren", "Agresivan"]
+
+# Kreiramo unakrsnu tabelu (crosstab) u procentima
+tabela_starost_profil = pd.crosstab(
+    df["starosna_grupa"],
+    df["profile_category"],
+    normalize='index'
+) * 100
+
+# Reindeksiramo tabelu i menjamo NaN vrednosti u 0
+tabela_starost_profil = tabela_starost_profil.reindex(
+    index=redosled_starosnih_grupa,
+    columns=redoseled_profila
+).fillna(0).round(2)
+
+tabela_starost_profil.columns = ["Конзервативан", "Умерен", "Агресиван"]
+tabela_starost_profil.index.name = "Старосна група"
+
+print("\n" + "=" * 60 + "\nТабела 4. Расподела инвестиционих профила по старосним групама (%)\n" + "=" * 60)
+print(tabela_starost_profil)
+print("=" * 60)
+print("\n" + "=" * 60 + "\nТабела 5. Просечне вредности индикатора по инвестиционом профилу\n" + "=" * 60)
+
+# Računamo proseke za tri ključna indikatora grupisana po profilima
+tabela_indikatora = df.groupby("profile_category")[["risk_scaled", "horizon_scaled", "knowledge_scaled"]].mean()
+
+# Reindeksiramo da redosled profila bude akademski (Konzervativan -> Umeren -> Agresivan)
+tabela_indikatora = tabela_indikatora.reindex(["Konzervativan", "Umeren", "Agresivan"])
+
+# Preimenujemo kolone i indeks u skladu sa tvojom slikom iz Word-a
+tabela_indikatora.columns = ["Толеранција на ризик", "Инвестициони хоризонт", "Финансијско знање"]
+tabela_indikatora.index.name = "Профил"
+
+# Zaokružujemo na 2 decimale i štampamo
+print(tabela_indikatora.round(2))
+print("=" * 60)
 
 # 7. GRAFIKONI
 
@@ -350,7 +408,7 @@ for kat in kategorije_za_iscrtavanje:
         s=60,
         edgecolors='none'
     )
-plt.title("Расподела инвестиционих профила у односу на толеранцију на ризик i знање", pad=15, weight='bold')
+plt.title("Расподела инвестиционих профила у одноsu на толеранцију на ризик i знање", pad=15, weight='bold')
 plt.xlabel("Толеранција на ризик (RT)")
 plt.ylabel("Финансијско знање (FK)")
 plt.xlim(-0.5, 10.5)
