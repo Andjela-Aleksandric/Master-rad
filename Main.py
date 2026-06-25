@@ -86,9 +86,10 @@ risk_core = iba_logical_aggregation(
 )
 
 df["risk_scaled"] = (
-        0.7 * risk_core
-        + 0.3 * df["priority_score"]
+    0.7 * risk_core +
+    0.3 * df["priority_score"]
 )
+
 df["knowledge_scaled"] = iba_logical_aggregation(
     df["etf_score"],
     df["technical_score"],
